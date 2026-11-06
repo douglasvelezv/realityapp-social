@@ -1,0 +1,2 @@
+-- Reality APP · Red social · esquema inicial (añade aquí tus tablas)
+-- Ejecuta con tu herramienta de base de datos o desde un migrador propio.

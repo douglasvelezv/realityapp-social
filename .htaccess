@@ -1,0 +1,11 @@
+# Reality APP · Red social · realityapp.org/social
+RewriteEngine On
+RewriteBase /social/
+
+# Protege configuración y base de datos
+RedirectMatch 404 ^/social/config(/|$)
+RedirectMatch 404 ^/social/config-example(/|$)
+RedirectMatch 404 ^/social/database(/|$)
+RedirectMatch 404 ^/social/\.git
+
+DirectoryIndex index.html index.php
