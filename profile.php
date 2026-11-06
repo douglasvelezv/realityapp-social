@@ -1,22 +1,70 @@
 <?php
-require __DIR__ . '/includes/session.php';
 require __DIR__ . '/includes/functions.php';
-$me = current_user();
-if ($me) ensure_profile((int)$me['id']);
-?><!doctype html>
-<html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Perfil · Reality Social</title><meta name="robots" content="noindex">
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#000;color:#e7e9ea;font:16px/1.6 system-ui,sans-serif;text-align:center;padding:24px}
-.b{display:inline-block;padding:6px 14px;border-radius:999px;background:#16202a;color:#1d9bf0;font-weight:700;font-size:13px}
-h1{font-size:clamp(26px,6vw,40px);margin:16px 0 6px}a{color:#1d9bf0}</style></head>
-<body><main>
-<span class="b">Reality Social · en construcción</span>
-<h1>Perfil</h1>
-<?php if ($me): ?>
-  <p>Sesión iniciada como <b>@<?= e($me['app_handle'] ?: ('user'.$me['id'])) ?></b> (vía <?= e($me['medium']) ?>).</p>
-<?php else: ?>
-  <p>No has iniciado sesión. El login es el mismo de <a href="/shop/">la tienda</a>.</p>
+$me = current_user(); $meId = $me ? (int)$me['id'] : 0;
+$handle = ltrim((string)($_GET['u'] ?? ''), '@');
+$u = $handle !== '' ? user_by_handle($handle) : null;
+
+if (!$u) {
+  $TITLE = 'Perfil'; $PAGE = 'profile';
+  require __DIR__ . '/includes/header.php';
+  echo '<div class="empty"><b>Esta cuenta no existe</b>Prueba a buscar otra.</div>';
+  require __DIR__ . '/includes/footer.php'; exit;
+}
+$uid = (int)$u['id'];
+$tab = in_array($_GET['tab'] ?? '', ['replies','likes'], true) ? $_GET['tab'] : 'posts';
+
+// fecha de alta (base compartida)
+$st = authdb()->prepare('SELECT created_at FROM users WHERE id = ?'); $st->execute([$uid]);
+$joined = (string)$st->fetchColumn();
+
+$cnt = fn($sql, $a) => (function($s,$a){ $q=db()->prepare($s); $q->execute($a); return (int)$q->fetchColumn(); })($sql,$a);
+$nPosts = $cnt('SELECT COUNT(*) FROM posts WHERE user_id=? AND reply_to IS NULL AND deleted_at IS NULL', [$uid]);
+$following = $cnt('SELECT COUNT(*) FROM follows WHERE follower_id=?', [$uid]);
+$followers = $cnt('SELECT COUNT(*) FROM follows WHERE followee_id=?', [$uid]);
+$iFollow = $meId && $cnt('SELECT COUNT(*) FROM follows WHERE follower_id=? AND followee_id=?', [$meId, $uid]) > 0;
+
+$type = $tab === 'replies' ? 'user_replies' : ($tab === 'likes' ? 'user_likes' : 'user');
+[$html, $next] = render_feed($type, ['uid' => $uid], $meId, 0, 20);
+
+$TITLE = $u['name']; $PAGE = 'profile';
+require __DIR__ . '/includes/header.php';
+$banner = upload_url('banners', $u['banner']);
+?>
+<div class="p-banner"><?php if ($banner): ?><img src="<?= e($banner) ?>" alt=""><?php endif; ?></div>
+<div class="p-head">
+  <div class="p-av"><?= avatar_html($u, 112) ?></div>
+  <div class="p-actions">
+    <?php if ($meId === $uid): ?>
+      <a class="btn-outline" href="<?= e(base_url('/settings.php')) ?>">Editar perfil</a>
+    <?php elseif ($meId): ?>
+      <button class="btn-follow <?= $iFollow ? 'ing' : '' ?>" data-follow="<?= $uid ?>"><?= $iFollow ? 'Siguiendo' : 'Seguir' ?></button>
+    <?php else: ?>
+      <a class="btn-follow" href="<?= e(base_url('/auth/login.php')) ?>">Seguir</a>
+    <?php endif; ?>
+  </div>
+  <h2 class="p-name"><?= e($u['name']) ?></h2>
+  <div class="p-handle">@<?= e($u['handle']) ?> · entró con <?= e($u['medium']) ?></div>
+  <?php if (!empty($u['bio'])): ?><div class="p-bio"><?= linkify($u['bio']) ?></div><?php endif; ?>
+  <div class="p-meta">
+    <?php if (!empty($u['location'])): ?><span>📍 <?= e($u['location']) ?></span><?php endif; ?>
+    <?php if (!empty($u['link'])): ?><a href="<?= e(preg_match('#^https?://#', $u['link']) ? $u['link'] : 'https://' . $u['link']) ?>" target="_blank" rel="noopener nofollow">🔗 <?= e(preg_replace('#^https?://#', '', $u['link'])) ?></a><?php endif; ?>
+    <span>📅 <?= e(date_long($joined)) ?></span>
+  </div>
+  <div class="p-stats">
+    <a href="<?= e(base_url('/profile.php?u=' . rawurlencode($u['handle']) . '&tab=following')) ?>"><b><?= num($following) ?></b> <span>Siguiendo</span></a>
+    <a href="<?= e(base_url('/profile.php?u=' . rawurlencode($u['handle']) . '&tab=followers')) ?>"><b><?= num($followers) ?></b> <span>Seguidores</span></a>
+    <span><b><?= num($nPosts) ?></b> <span>Posts</span></span>
+  </div>
+</div>
+<div class="tabs">
+  <a class="<?= $tab==='posts'?'on':'' ?>" href="?u=<?= rawurlencode($u['handle']) ?>">Posts</a>
+  <a class="<?= $tab==='replies'?'on':'' ?>" href="?u=<?= rawurlencode($u['handle']) ?>&tab=replies">Respuestas</a>
+  <a class="<?= $tab==='likes'?'on':'' ?>" href="?u=<?= rawurlencode($u['handle']) ?>&tab=likes">Me gusta</a>
+</div>
+<div data-stream>
+<?php echo $html !== '' ? $html : '<div class="empty"><b>Nada por aquí todavía</b></div>'; ?>
+</div>
+<?php if ($next !== null): ?>
+<button class="load-more" data-more="<?= e(base_url('/api/stream.php?type=' . $type . '&uid=' . $uid . '&offset=' . $next)) ?>">Mostrar más</button>
 <?php endif; ?>
-<p style="color:#71767b">Esta sección se construye en los próximos pasos.</p>
-</main></body></html>
+<?php require __DIR__ . '/includes/footer.php'; ?>

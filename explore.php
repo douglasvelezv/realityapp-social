@@ -1,22 +1,25 @@
 <?php
-require __DIR__ . '/includes/session.php';
 require __DIR__ . '/includes/functions.php';
-$me = current_user();
-if ($me) ensure_profile((int)$me['id']);
-?><!doctype html>
-<html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Explorar · Reality Social</title><meta name="robots" content="noindex">
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#000;color:#e7e9ea;font:16px/1.6 system-ui,sans-serif;text-align:center;padding:24px}
-.b{display:inline-block;padding:6px 14px;border-radius:999px;background:#16202a;color:#1d9bf0;font-weight:700;font-size:13px}
-h1{font-size:clamp(26px,6vw,40px);margin:16px 0 6px}a{color:#1d9bf0}</style></head>
-<body><main>
-<span class="b">Reality Social · en construcción</span>
-<h1>Explorar</h1>
-<?php if ($me): ?>
-  <p>Sesión iniciada como <b>@<?= e($me['app_handle'] ?: ('user'.$me['id'])) ?></b> (vía <?= e($me['medium']) ?>).</p>
-<?php else: ?>
-  <p>No has iniciado sesión. El login es el mismo de <a href="/shop/">la tienda</a>.</p>
+$me = current_user(); $meId = $me ? (int)$me['id'] : 0;
+[$html, $next] = render_feed('explore', [], $meId, 0, 20);
+// tendencias
+$trends = db()->query("SELECT h.tag, COUNT(*) n FROM post_hashtags ph JOIN hashtags h ON h.id=ph.hashtag_id
+                       GROUP BY h.id ORDER BY n DESC, h.id DESC LIMIT 8")->fetchAll();
+ob_start(); ?>
+<div class="widget"><h2>Tendencias</h2>
+<?php if (!$trends): ?><div class="trend"><span class="c">Aún no hay tendencias.</span></div><?php endif; ?>
+<?php foreach ($trends as $t): ?>
+  <a class="trend" href="<?= e(base_url('/hashtag.php?tag=' . rawurlencode($t['tag']))) ?>">
+    <div class="t">#<?= e($t['tag']) ?></div><div class="c"><?= (int)$t['n'] ?> publicaciones</div></a>
+<?php endforeach; ?>
+</div>
+<?php $SIDEBAR = ob_get_clean();
+$TITLE = 'Explorar'; $PAGE = 'explore';
+require __DIR__ . '/includes/header.php'; ?>
+<div data-stream>
+<?php echo $html !== '' ? $html : '<div class="empty"><b>Todavía no hay publicaciones</b>¡Sé el primero en publicar!</div>'; ?>
+</div>
+<?php if ($next !== null): ?>
+<button class="load-more" data-more="<?= e(base_url('/api/stream.php?type=explore&offset=' . $next)) ?>">Mostrar más</button>
 <?php endif; ?>
-<p style="color:#71767b">Esta sección se construye en los próximos pasos.</p>
-</main></body></html>
+<?php require __DIR__ . '/includes/footer.php'; ?>

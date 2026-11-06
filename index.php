@@ -1,22 +1,43 @@
 <?php
-require __DIR__ . '/includes/session.php';
 require __DIR__ . '/includes/functions.php';
 $me = current_user();
-if ($me) ensure_profile((int)$me['id']);
-?><!doctype html>
-<html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Inicio · Reality Social</title><meta name="robots" content="noindex">
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#000;color:#e7e9ea;font:16px/1.6 system-ui,sans-serif;text-align:center;padding:24px}
-.b{display:inline-block;padding:6px 14px;border-radius:999px;background:#16202a;color:#1d9bf0;font-weight:700;font-size:13px}
-h1{font-size:clamp(26px,6vw,40px);margin:16px 0 6px}a{color:#1d9bf0}</style></head>
-<body><main>
-<span class="b">Reality Social · en construcción</span>
-<h1>Inicio</h1>
-<?php if ($me): ?>
-  <p>Sesión iniciada como <b>@<?= e($me['app_handle'] ?: ('user'.$me['id'])) ?></b> (vía <?= e($me['medium']) ?>).</p>
-<?php else: ?>
-  <p>No has iniciado sesión. El login es el mismo de <a href="/shop/">la tienda</a>.</p>
+if (!$me) require __DIR__ . '/includes/gate.php';
+$meId = (int)$me['id'];
+ensure_profile($meId);
+
+// a quién sigo (+ yo mismo)
+$st = db()->prepare('SELECT followee_id FROM follows WHERE follower_id = ?');
+$st->execute([$meId]);
+$ids = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+$ids[] = $meId;
+
+[$html, $next] = render_feed('home', ['ids' => $ids], $meId, 0, 20);
+$TITLE = 'Inicio'; $PAGE = 'home';
+require __DIR__ . '/includes/header.php';
+$meU = user_by_id($meId);
+?>
+<form class="composer" data-composer enctype="multipart/form-data">
+  <?= avatar_html($meU, 44) ?>
+  <div class="composer-main">
+    <textarea name="body" maxlength="280" rows="2" placeholder="¿Qué está pasando?"></textarea>
+    <div class="composer-preview" hidden><img alt=""><button type="button" class="rm-img" aria-label="Quitar">✕</button></div>
+    <div class="composer-bar">
+      <label class="icon-btn" title="Añadir imagen">
+        <input type="file" name="image" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+      </label>
+      <span class="count" data-count>280</span>
+      <button class="btn-primary" type="submit" data-submit disabled>Postear</button>
+    </div>
+  </div>
+</form>
+
+<div data-stream>
+<?php if ($html === ''): ?>
+  <div class="empty"><b>Tu inicio está vacío</b>Sigue a gente o publica tu primer post. También puedes ir a <a href="<?= e(base_url('/explore.php')) ?>" style="color:var(--accent)">Explorar</a>.</div>
+<?php else: echo $html; endif; ?>
+</div>
+<?php if ($next !== null): ?>
+<button class="load-more" data-more="<?= e(base_url('/api/stream.php?type=home&offset=' . $next)) ?>">Mostrar más</button>
 <?php endif; ?>
-<p style="color:#71767b">Esta sección se construye en los próximos pasos.</p>
-</main></body></html>
+<?php require __DIR__ . '/includes/footer.php'; ?>

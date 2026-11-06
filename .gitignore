@@ -1,3 +1,8 @@
 /config/
+/uploads/*/
+/uploads/*.jpg
+/uploads/*.png
+/uploads/*.webp
+/uploads/*.gif
 *.log
 .DS_Store

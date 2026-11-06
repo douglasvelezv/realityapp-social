@@ -1,22 +1,24 @@
 <?php
-require __DIR__ . '/includes/session.php';
 require __DIR__ . '/includes/functions.php';
 $me = current_user();
-if ($me) ensure_profile((int)$me['id']);
-?><!doctype html>
-<html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Notificaciones · Reality Social</title><meta name="robots" content="noindex">
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#000;color:#e7e9ea;font:16px/1.6 system-ui,sans-serif;text-align:center;padding:24px}
-.b{display:inline-block;padding:6px 14px;border-radius:999px;background:#16202a;color:#1d9bf0;font-weight:700;font-size:13px}
-h1{font-size:clamp(26px,6vw,40px);margin:16px 0 6px}a{color:#1d9bf0}</style></head>
-<body><main>
-<span class="b">Reality Social · en construcción</span>
-<h1>Notificaciones</h1>
-<?php if ($me): ?>
-  <p>Sesión iniciada como <b>@<?= e($me['app_handle'] ?: ('user'.$me['id'])) ?></b> (vía <?= e($me['medium']) ?>).</p>
-<?php else: ?>
-  <p>No has iniciado sesión. El login es el mismo de <a href="/shop/">la tienda</a>.</p>
-<?php endif; ?>
-<p style="color:#71767b">Esta sección se construye en los próximos pasos.</p>
-</main></body></html>
+if (!$me) { header('Location: ' . base_url('/auth/login.php')); exit; }
+$meId = (int)$me['id'];
+$rows = db()->prepare('SELECT * FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 50');
+$rows->execute([$meId]); $rows = $rows->fetchAll();
+db()->prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0')->execute([$meId]);
+$actors = users_by_ids(array_map(fn($r) => (int)$r['actor_id'], $rows));
+$verbs = ['follow'=>'te empezó a seguir','like'=>'le dio me gusta a tu post','reply'=>'respondió a tu post','mention'=>'te mencionó','repost'=>'reposteó tu post'];
+$TITLE = 'Notificaciones'; $PAGE = 'notif';
+require __DIR__ . '/includes/header.php'; ?>
+<div>
+<?php if (!$rows): ?><div class="empty"><b>Sin notificaciones todavía</b>Cuando alguien interactúe contigo, aparecerá aquí.</div><?php endif; ?>
+<?php foreach ($rows as $n): $a = $actors[(int)$n['actor_id']] ?? null; if (!$a) continue;
+  $href = $n['post_id'] ? base_url('/post.php?id=' . (int)$n['post_id']) : base_url('/profile.php?u=' . rawurlencode($a['handle'])); ?>
+  <a class="wrow" href="<?= e($href) ?>" style="border-bottom:1px solid var(--line)">
+    <?= avatar_html($a, 40) ?>
+    <div style="min-width:0"><span class="nm" style="display:inline"><?= e($a['name']) ?></span>
+      <span class="hd"><?= e($verbs[$n['type']] ?? 'interactuó') ?> · <?= e(time_ago($n['created_at'])) ?></span></div>
+  </a>
+<?php endforeach; ?>
+</div>
+<?php require __DIR__ . '/includes/footer.php'; ?>

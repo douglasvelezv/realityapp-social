@@ -1,22 +1,49 @@
 <?php
-require __DIR__ . '/includes/session.php';
 require __DIR__ . '/includes/functions.php';
 $me = current_user();
-if ($me) ensure_profile((int)$me['id']);
-?><!doctype html>
-<html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ajustes · Reality Social</title><meta name="robots" content="noindex">
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#000;color:#e7e9ea;font:16px/1.6 system-ui,sans-serif;text-align:center;padding:24px}
-.b{display:inline-block;padding:6px 14px;border-radius:999px;background:#16202a;color:#1d9bf0;font-weight:700;font-size:13px}
-h1{font-size:clamp(26px,6vw,40px);margin:16px 0 6px}a{color:#1d9bf0}</style></head>
-<body><main>
-<span class="b">Reality Social · en construcción</span>
-<h1>Ajustes</h1>
-<?php if ($me): ?>
-  <p>Sesión iniciada como <b>@<?= e($me['app_handle'] ?: ('user'.$me['id'])) ?></b> (vía <?= e($me['medium']) ?>).</p>
-<?php else: ?>
-  <p>No has iniciado sesión. El login es el mismo de <a href="/shop/">la tienda</a>.</p>
-<?php endif; ?>
-<p style="color:#71767b">Esta sección se construye en los próximos pasos.</p>
-</main></body></html>
+if (!$me) { header('Location: ' . base_url('/auth/login.php')); exit; }
+$meId = (int)$me['id']; ensure_profile($meId);
+$u = user_by_id($meId);
+$TITLE = 'Ajustes'; $PAGE = 'settings';
+require __DIR__ . '/includes/header.php'; ?>
+<form class="set-form" data-profile enctype="multipart/form-data" style="padding:16px;max-width:560px">
+  <div class="p-banner" style="border-radius:16px;margin-bottom:56px">
+    <?php $b = upload_url('banners', $u['banner']); if ($b): ?><img src="<?= e($b) ?>" alt=""><?php endif; ?>
+    <label class="icon-btn" style="position:absolute;right:10px;top:10px;background:rgba(0,0,0,.6);color:#fff;width:40px;height:40px">
+      <input type="file" name="banner" accept="image/*" hidden>✎</label>
+    <div class="p-av" style="left:16px"><?= avatar_html($u, 96) ?>
+      <label class="icon-btn" style="position:absolute;inset:0;margin:auto;background:rgba(0,0,0,.45);color:#fff;width:40px;height:40px">
+        <input type="file" name="avatar" accept="image/*" hidden>✎</label>
+    </div>
+  </div>
+  <label class="lbl">Nombre</label>
+  <input class="in" value="<?= e($u['name']) ?>" disabled>
+  <label class="lbl">Usuario</label>
+  <input class="in" value="@<?= e($u['handle']) ?>" disabled>
+  <small style="color:var(--muted)">El nombre y el usuario se gestionan en tu cuenta (son los mismos en toda la comunidad).</small>
+  <label class="lbl">Biografía</label>
+  <textarea class="in" name="bio" maxlength="160" rows="3"><?= e($u['bio']) ?></textarea>
+  <label class="lbl">Ubicación</label>
+  <input class="in" name="location" maxlength="60" value="<?= e($u['location']) ?>">
+  <label class="lbl">Enlace</label>
+  <input class="in" name="link" maxlength="120" value="<?= e($u['link']) ?>" placeholder="tusitio.com">
+  <button class="btn-primary" type="submit" style="margin-top:16px">Guardar</button>
+  <p data-set-msg style="min-height:18px;color:var(--accent)"></p>
+</form>
+<style>
+.set-form .lbl{display:block;margin:14px 0 4px;color:var(--muted);font-size:13px}
+.set-form .in{width:100%;padding:12px;border-radius:8px;border:1px solid var(--line);background:#000;color:var(--text);font:inherit}
+.set-form .in:disabled{opacity:.6}
+</style>
+<script>
+document.querySelector('[data-profile]').addEventListener('submit', async function(e){
+  e.preventDefault(); const f = e.target, msg = f.querySelector('[data-set-msg]');
+  const fd = new FormData(f); fd.append('csrf', window.RS.csrf);
+  try {
+    const r = await fetch(window.RS.base + '/api/profile.php', {method:'POST', headers:{'X-Requested-With':'fetch'}, body: fd});
+    const j = await r.json(); if(!r.ok) throw new Error(j.error||'Error');
+    msg.textContent = 'Guardado ✓'; setTimeout(()=>location.reload(), 600);
+  } catch(ex){ msg.style.color='var(--like)'; msg.textContent = ex.message; }
+});
+</script>
+<?php require __DIR__ . '/includes/footer.php'; ?>
