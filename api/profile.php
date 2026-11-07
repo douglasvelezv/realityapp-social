@@ -10,8 +10,12 @@ $me = (int)$u['id']; ensure_profile($me);
 $bio = mb_substr(trim((string)($_POST['bio'] ?? '')), 0, 160);
 $loc = mb_substr(trim((string)($_POST['location'] ?? '')), 0, 60);
 $link = mb_substr(trim((string)($_POST['link'] ?? '')), 0, 120);
-db()->prepare('UPDATE profiles SET bio = ?, location = ?, link = ? WHERE user_id = ?')
-    ->execute([$bio ?: null, $loc ?: null, $link ?: null, $me]);
+$live = mb_substr(trim((string)($_POST['live_url'] ?? '')), 0, 160);
+// Solo aceptamos enlaces de transmisión http(s) (o vacío para quitar).
+if ($live !== '' && !preg_match('#^https?://#i', $live)) $live = 'https://' . $live;
+if ($live !== '' && !filter_var($live, FILTER_VALIDATE_URL)) json_out(['error' => 'El enlace de directo no es válido.'], 422);
+db()->prepare('UPDATE profiles SET bio = ?, location = ?, link = ?, live_url = ? WHERE user_id = ?')
+    ->execute([$bio ?: null, $loc ?: null, $link ?: null, $live ?: null, $me]);
 
 if ($av = save_upload('avatar', 'avatars')) db()->prepare('UPDATE profiles SET avatar = ? WHERE user_id = ?')->execute([$av, $me]);
 if ($bn = save_upload('banner', 'banners')) db()->prepare('UPDATE profiles SET banner = ? WHERE user_id = ?')->execute([$bn, $me]);

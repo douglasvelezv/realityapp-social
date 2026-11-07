@@ -43,6 +43,6 @@ $SIDEBAR = $SIDEBAR ?? '';
 <?php endif; ?>
 
 <div id="toast" aria-live="polite"></div>
-<script src="<?= e(base_url('/assets/js/app.js?v=1')) ?>"></script>
+<script src="<?= e(base_url('/assets/js/app.js?v=2')) ?>"></script>
 </body>
 </html>

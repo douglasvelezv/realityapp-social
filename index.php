@@ -40,4 +40,4 @@ $meU = user_by_id($meId);
 <?php if ($next !== null): ?>
 <button class="load-more" data-more="<?= e(base_url('/api/stream.php?type=home&offset=' . $next)) ?>">Mostrar más</button>
 <?php endif; ?>
-<?php require __DIR__ . '/includes/footer.php'; ?>
+<?php $SIDEBAR = render_aside($meId); require __DIR__ . '/includes/footer.php'; ?>

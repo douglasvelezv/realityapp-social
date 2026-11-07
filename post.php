@@ -18,6 +18,8 @@ if ($p['reply_to']) {
     $parentHtml = render_post($pp, $us, $sstat, $meId);
   }
 }
+// registra visualización real (una por usuario)
+if ($meId) db()->prepare('INSERT IGNORE INTO post_views (post_id, user_id) VALUES (?,?)')->execute([$id, $meId]);
 // post principal
 $us = users_by_ids([(int)$p['user_id']]); $sstat = post_stats([(int)$p['id']], $meId);
 $au = $us[(int)$p['user_id']];
@@ -29,19 +31,30 @@ $au = $us[(int)$p['user_id']];
   <div class="post-head-lg">
     <a href="<?= e(base_url('/profile.php?u=' . rawurlencode($au['handle']))) ?>"><?= avatar_html($au, 48) ?></a>
     <div>
-      <a class="post-name" href="<?= e(base_url('/profile.php?u=' . rawurlencode($au['handle']))) ?>"><?= e($au['name']) ?></a>
+      <a class="post-name" href="<?= e(base_url('/profile.php?u=' . rawurlencode($au['handle']))) ?>"><?= e($au['name']) ?></a><?= verified_badge($au) ?>
       <div class="post-handle">@<?= e($au['handle']) ?></div>
     </div>
-    <?php if ($meId === (int)$p['user_id']): ?><button class="post-del" data-del="<?= $id ?>" aria-label="Eliminar" style="margin-left:auto"><?= icon('trash') ?></button><?php endif; ?>
+    <?php if ($meId === (int)$p['user_id']): ?>
+      <div class="post-menu" style="margin-left:auto">
+        <button class="post-more" data-menu aria-label="Más"><?= icon('more') ?></button>
+        <div class="menu" hidden>
+          <button data-pin="<?= $id ?>"><?= icon('pin') ?>Fijar en tu perfil</button>
+          <button class="danger" data-del="<?= $id ?>"><?= icon('trash') ?>Eliminar</button>
+        </div>
+      </div>
+    <?php endif; ?>
   </div>
   <?php if (trim((string)$p['body']) !== ''): ?><div class="post-body-lg"><?= linkify($p['body']) ?></div><?php endif; ?>
   <?php $img = upload_url('posts', $p['image']); if ($img): ?><a class="post-img" href="<?= e($img) ?>" target="_blank"><img src="<?= e($img) ?>" alt=""></a><?php endif; ?>
-  <div class="post-time-lg"><?= e(date('H:i', strtotime($p['created_at'].' UTC'))) ?> · <?= e(date('j M Y', strtotime($p['created_at'].' UTC'))) ?></div>
+  <?php if (!empty($p['repost_of'])): ?><?= quoted_card((int)$p['repost_of']) ?><?php endif; ?>
+  <div class="post-time-lg"><?= e(date('H:i', strtotime($p['created_at'].' UTC'))) ?> · <?= e(date('j M Y', strtotime($p['created_at'].' UTC'))) ?> · <b style="color:var(--text)"><?= num($sstat[$id]['views']) ?></b> visualizaciones</div>
   <?php $s = $sstat[$id]; ?>
   <div class="post-acts post-acts-lg">
-    <span class="act"><?= icon('reply') ?><span><?= num($s['replies']) ?></span></span>
+    <span class="act act-reply"><?= icon('reply') ?><span><?= num($s['replies']) ?></span></span>
     <button class="act act-repost <?= $s['reposted']?'on':'' ?>" data-repost="<?= $id ?>"><?= icon('repost') ?><span><?= num($s['reposts']) ?></span></button>
     <button class="act act-like <?= $s['liked']?'on':'' ?>" data-like="<?= $id ?>"><?= $s['liked']?icon('liked'):icon('like') ?><span><?= num($s['likes']) ?></span></button>
+    <button class="act act-bm <?= $s['bookmarked']?'on':'' ?>" data-bookmark="<?= $id ?>" title="Guardar"><?= $s['bookmarked']?icon('bookmarked'):icon('bookmark') ?></button>
+    <button class="act act-share" data-copy="<?= e(base_url('/post.php?id=' . $id)) ?>" title="Compartir"><?= icon('share') ?></button>
   </div>
 </article>
 

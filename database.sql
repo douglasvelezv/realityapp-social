@@ -102,3 +102,20 @@ CREATE TABLE IF NOT EXISTS notifications (
   PRIMARY KEY (id),
   KEY idx_notif_user (user_id, is_read, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Guardados (bookmarks): privados de cada usuario.
+CREATE TABLE IF NOT EXISTS bookmarks (
+  user_id    INT UNSIGNED NOT NULL,
+  post_id    BIGINT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, post_id),
+  KEY idx_bm_user (user_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Visualizaciones reales: una por usuario y post (no se inflan).
+CREATE TABLE IF NOT EXISTS post_views (
+  post_id    BIGINT UNSIGNED NOT NULL,
+  user_id    INT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (post_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

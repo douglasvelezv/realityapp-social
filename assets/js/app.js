@@ -24,13 +24,47 @@
     : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K' : (n || '');
   const needLogin = () => { toast('Inicia sesión para continuar'); setTimeout(() => location.href = RS.base + '/auth/login.php', 700); };
 
+  const ICON = {
+    like:  '<path d="M12 21s-7.5-4.6-10-9.3C.3 8.3 1.9 4.5 5.5 4.5c2 0 3.3 1.1 4.1 2.3L12 9l2.4-2.2c.8-1.2 2.1-2.3 4.1-2.3 3.6 0 5.2 3.8 3.5 7.2C19.5 16.4 12 21 12 21Z"/>',
+    liked: '<path d="M12 21s-7.5-4.6-10-9.3C.3 8.3 1.9 4.5 5.5 4.5c2 0 3.3 1.1 4.1 2.3L12 9l2.4-2.2c.8-1.2 2.1-2.3 4.1-2.3 3.6 0 5.2 3.8 3.5 7.2C19.5 16.4 12 21 12 21Z" fill="currentColor"/>',
+    bookmark:   '<path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.5L5 21V4a1 1 0 0 1 1-1Z"/>',
+    bookmarked: '<path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.5L5 21V4a1 1 0 0 1 1-1Z" fill="currentColor"/>'
+  };
+  function setSvg(btn, name) { const svg = $('svg', btn); if (svg) svg.innerHTML = ICON[name] || ''; }
+
+  function closeMenus(except) { $$('.menu:not([hidden])').forEach(m => { if (m !== except) m.hidden = true; }); $$('.pop').forEach(p => { if (p !== except) p.remove(); }); }
+
+  async function doRepost(btn) {
+    const id = btn.dataset.repost, span = $('span', btn), on = btn.classList.contains('on');
+    btn.classList.toggle('on');
+    try { const j = await api('repost.php', { id }); if (span) span.textContent = fmt(j.count); toast(on ? 'Repost quitado' : 'Reposteado'); }
+    catch (e) { btn.classList.toggle('on'); toast(e.message, 1); }
+  }
+  function repostMenu(btn) {
+    closeMenus();
+    const id = btn.dataset.repost, on = btn.classList.contains('on');
+    const pop = document.createElement('div'); pop.className = 'pop';
+    pop.innerHTML = '<button data-rp>' + (on ? 'Deshacer repost' : 'Repostear') + '</button><button data-qt>Citar</button>';
+    document.body.appendChild(pop);
+    const r = btn.getBoundingClientRect();
+    pop.style.top = (window.scrollY + r.bottom + 6) + 'px';
+    pop.style.left = (window.scrollX + r.left) + 'px';
+    pop.querySelector('[data-rp]').onclick = () => { pop.remove(); doRepost(btn); };
+    pop.querySelector('[data-qt]').onclick = () => { pop.remove(); openQuote(id); };
+  }
+
   /* ---- Delegación de clicks ---- */
   document.addEventListener('click', async (ev) => {
     const like = ev.target.closest('[data-like]');
     const rep = ev.target.closest('[data-repost]');
+    const bm = ev.target.closest('[data-bookmark]');
+    const copy = ev.target.closest('[data-copy]');
+    const menuBtn = ev.target.closest('[data-menu]');
+    const pin = ev.target.closest('[data-pin]');
     const del = ev.target.closest('[data-del]');
     const foll = ev.target.closest('[data-follow]');
     const openC = ev.target.closest('[data-open-compose]');
+    const themeT = ev.target.closest('[data-theme-toggle]');
     const post = ev.target.closest('.post[data-href]');
 
     if (like) {
@@ -42,14 +76,35 @@
       catch (e) { like.classList.toggle('on'); setSvg(like, on ? 'liked' : 'like'); toast(e.message, 1); }
       return;
     }
-    if (rep) {
+    if (rep) { ev.preventDefault(); if (!RS.me) return needLogin(); repostMenu(rep); return; }
+    if (bm) {
       ev.preventDefault();
       if (!RS.me) return needLogin();
-      const id = rep.dataset.repost, span = $('span', rep), on = rep.classList.contains('on');
-      rep.classList.toggle('on');
-      try { const j = await api('repost.php', { id }); span.textContent = fmt(j.count); toast(on ? 'Repost quitado' : 'Reposteado'); }
-      catch (e) { rep.classList.toggle('on'); toast(e.message, 1); }
+      const id = bm.dataset.bookmark, on = bm.classList.contains('on');
+      bm.classList.toggle('on'); setSvg(bm, !on ? 'bookmarked' : 'bookmark');
+      try { const j = await api('bookmark.php', { id }); toast(j.bookmarked ? 'Guardado' : 'Quitado de guardados'); }
+      catch (e) { bm.classList.toggle('on'); setSvg(bm, on ? 'bookmarked' : 'bookmark'); toast(e.message, 1); }
       return;
+    }
+    if (copy) {
+      ev.preventDefault();
+      const url = new URL(copy.dataset.copy, location.origin).href;
+      try { await navigator.clipboard.writeText(url); toast('Enlace copiado'); }
+      catch (e) { prompt('Copia el enlace:', url); }
+      closeMenus(); return;
+    }
+    if (menuBtn) {
+      ev.preventDefault(); ev.stopPropagation();
+      const menu = menuBtn.parentElement.querySelector('.menu');
+      const willOpen = menu && menu.hidden; closeMenus(menu);
+      if (menu) menu.hidden = !willOpen;
+      return;
+    }
+    if (pin) {
+      ev.preventDefault();
+      try { const j = await api('post.php', { action: 'pin', id: pin.dataset.pin }); toast(j.pinned ? 'Fijado en tu perfil' : 'Dejó de estar fijado'); setTimeout(() => location.reload(), 500); }
+      catch (e) { toast(e.message, 1); }
+      closeMenus(); return;
     }
     if (foll) {
       ev.preventDefault();
@@ -67,17 +122,14 @@
       if (!confirm('¿Eliminar esta publicación?')) return;
       try { await api('post.php', { action: 'delete', id: del.dataset.del }); const el = del.closest('.post'); if (el) el.remove(); toast('Publicación eliminada'); }
       catch (e) { toast(e.message, 1); }
-      return;
+      closeMenus(); return;
     }
+    if (themeT) { ev.preventDefault(); toggleTheme(); return; }
     if (openC) { ev.preventDefault(); openCompose(); return; }
+    if (ev.target.closest('.menu') || ev.target.closest('.pop')) return;
+    closeMenus();
     if (post && !ev.target.closest('a,button')) { location.href = post.dataset.href; }
   });
-
-  function setSvg(btn, name) {
-    const fill = name === 'liked';
-    const svg = $('svg', btn); if (!svg) return;
-    svg.innerHTML = '<path d="M12 21s-7.5-4.6-10-9.3C.3 8.3 1.9 4.5 5.5 4.5c2 0 3.3 1.1 4.1 2.3L12 9l2.4-2.2c.8-1.2 2.1-2.3 4.1-2.3 3.6 0 5.2 3.8 3.5 7.2C19.5 16.4 12 21 12 21Z"' + (fill ? ' fill="currentColor"' : '') + '/>';
-  }
 
   /* ---- Composer (modal + en línea) ---- */
   function wireComposer(form) {
@@ -86,8 +138,9 @@
     const file = $('input[type=file]', form), prev = $('.composer-preview', form);
     const refresh = () => {
       const len = ta.value.length, left = 280 - len;
+      const hasQuote = !!form.querySelector('[name=quote_of]');
       if (count) { count.textContent = left; count.className = 'count' + (left < 0 ? ' over' : left <= 20 ? ' warn' : ''); }
-      if (submit) submit.disabled = (len === 0 && !(file && file.files.length)) || left < 0;
+      if (submit) submit.disabled = (len === 0 && !(file && file.files.length) && !hasQuote) || left < 0;
     };
     ta && ta.addEventListener('input', refresh);
     if (file) file.addEventListener('change', () => {
@@ -119,9 +172,54 @@
     refresh();
   }
   const openCompose = () => { const m = $('#composeModal'); if (m) { m.hidden = false; const t = $('textarea', m); t && t.focus(); } };
-  const closeCompose = () => { const m = $('#composeModal'); if (m) m.hidden = true; };
+  const closeCompose = () => {
+    const m = $('#composeModal'); if (!m) return; m.hidden = true;
+    const f = $('form[data-composer]', m); if (f) { const q = $('[name=quote_of]', f); if (q) q.remove(); const c = $('.quote-ctx', f); if (c) c.remove(); }
+  };
+  function openQuote(id) {
+    if (!RS.me) return needLogin();
+    const m = $('#composeModal'); if (!m) { location.href = RS.base + '/?quote=' + id; return; }
+    const f = $('form[data-composer]', m); const main = $('.composer-main', f);
+    let q = $('[name=quote_of]', f); if (!q) { q = document.createElement('input'); q.type = 'hidden'; q.name = 'quote_of'; f.appendChild(q); }
+    q.value = id;
+    if (!$('.quote-ctx', f)) { const note = document.createElement('div'); note.className = 'quote-ctx'; note.textContent = 'Citando una publicación'; main.appendChild(note); }
+    openCompose(); const t = $('textarea', m); t && (t.placeholder = 'Añade un comentario', t.focus());
+    const sub = $('[data-submit], button[type=submit]', f); if (sub) sub.disabled = false;   // la cita ya es contenido
+  }
   document.addEventListener('click', e => { if (e.target.closest('[data-close-compose]') || e.target.id === 'composeModal') closeCompose(); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCompose(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCompose(); closeMenus(); } });
+
+  /* ---- Tema claro/oscuro ---- */
+  function applyTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    try { localStorage.setItem('rs-theme', t); } catch (e) {}
+    $$('[data-theme-toggle] .tt-label').forEach(el => el.textContent = t === 'light' ? 'Modo oscuro' : 'Modo claro');
+  }
+  function toggleTheme() { const cur = document.documentElement.getAttribute('data-theme') || 'dark'; applyTheme(cur === 'dark' ? 'light' : 'dark'); }
+
+  /* ---- Visualizaciones reales (impresiones del feed) ---- */
+  function wireViews() {
+    if (!RS.me || !('IntersectionObserver' in window)) return;
+    const seen = new Set(); let pending = [], timer = null;
+    const flush = () => {
+      if (!pending.length) return;
+      const ids = pending.splice(0); timer = null;
+      fetch(RS.base + '/api/view.php', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' }, body: JSON.stringify({ ids }) }).catch(() => {});
+    };
+    const io = new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        if (!en.isIntersecting) continue;
+        const el = en.target, id = el.dataset.id;
+        if (!id || seen.has(id)) { io.unobserve(el); continue; }
+        seen.add(id); pending.push(+id); io.unobserve(el);
+        if (!timer) timer = setTimeout(flush, 1200);
+      }
+    }, { threshold: 0.6 });
+    const watch = () => $$('.post[data-id]').forEach(p => io.observe(p));
+    watch();
+    new MutationObserver(watch).observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('beforeunload', flush);
+  }
 
   /* ---- Cargar más ---- */
   document.addEventListener('click', async (ev) => {
@@ -138,5 +236,9 @@
     } catch (e) { btn.textContent = 'Mostrar más'; toast('No se pudo cargar más', 1); }
   });
 
-  document.addEventListener('DOMContentLoaded', () => { $$('[data-composer]').forEach(wireComposer); });
+  document.addEventListener('DOMContentLoaded', () => {
+    $$('[data-composer]').forEach(wireComposer); wireViews();
+    const t = document.documentElement.getAttribute('data-theme') || 'dark';
+    $$('[data-theme-toggle] .tt-label').forEach(el => el.textContent = t === 'light' ? 'Modo oscuro' : 'Modo claro');
+  });
 })();

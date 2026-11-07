@@ -27,6 +27,9 @@ require __DIR__ . '/includes/header.php'; ?>
   <input class="in" name="location" maxlength="60" value="<?= e($u['location']) ?>">
   <label class="lbl">Enlace</label>
   <input class="in" name="link" maxlength="120" value="<?= e($u['link']) ?>" placeholder="tusitio.com">
+  <label class="lbl">En directo (Twitch / YouTube)</label>
+  <input class="in" name="live_url" maxlength="160" value="<?= e($u['live_url'] ?? '') ?>" placeholder="twitch.tv/tucanal — se mostrará un botón EN DIRECTO en tu perfil">
+  <small style="color:var(--muted)">Pega el enlace de tu canal cuando transmitas. Déjalo vacío para ocultar el botón.</small>
   <button class="btn-primary" type="submit" style="margin-top:16px">Guardar</button>
   <p data-set-msg style="min-height:18px;color:var(--accent)"></p>
 </form>

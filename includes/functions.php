@@ -83,19 +83,23 @@ function users_by_ids(array $ids): array {
             'handle'  => $r['app_handle'] ?: ('user' . $id),
             'medium'  => $r['google_uid'] ? 'google' : ($r['x_uid'] ? 'x' : 'correo'),
             'avatar'  => null, 'bio' => '', 'location' => '', 'link' => '', 'banner' => null,
+            'verified' => 0, 'live_url' => '', 'pinned_post' => null,
         ];
     }
-    // Datos propios de social (bio, avatar, banner…)
-    $st = db()->prepare("SELECT user_id, bio, location, link, avatar, banner FROM profiles WHERE user_id IN ($in)");
+    // Datos propios de social (bio, avatar, banner, verificado, en directo…)
+    $st = db()->prepare("SELECT user_id, bio, location, link, avatar, banner, verified, live_url, pinned_post FROM profiles WHERE user_id IN ($in)");
     $st->execute($ids);
     foreach ($st as $r) {
         $id = (int)$r['user_id'];
         if (!isset($out[$id])) continue;
-        $out[$id]['bio']      = $r['bio'] ?? '';
-        $out[$id]['location'] = $r['location'] ?? '';
-        $out[$id]['link']     = $r['link'] ?? '';
-        $out[$id]['avatar']   = $r['avatar'] ?: null;
-        $out[$id]['banner']   = $r['banner'] ?: null;
+        $out[$id]['bio']         = $r['bio'] ?? '';
+        $out[$id]['location']    = $r['location'] ?? '';
+        $out[$id]['link']        = $r['link'] ?? '';
+        $out[$id]['avatar']      = $r['avatar'] ?: null;
+        $out[$id]['banner']      = $r['banner'] ?: null;
+        $out[$id]['verified']    = (int)($r['verified'] ?? 0);
+        $out[$id]['live_url']    = $r['live_url'] ?? '';
+        $out[$id]['pinned_post'] = $r['pinned_post'] ? (int)$r['pinned_post'] : null;
     }
     return $out;
 }
@@ -163,18 +167,22 @@ function post_stats(array $postIds, int $me): array {
     if (!$postIds) return [];
     $in = implode(',', array_fill(0, count($postIds), '?'));
     $out = [];
-    foreach ($postIds as $id) $out[$id] = ['likes' => 0, 'reposts' => 0, 'replies' => 0, 'liked' => false, 'reposted' => false];
+    foreach ($postIds as $id) $out[$id] = ['likes' => 0, 'reposts' => 0, 'replies' => 0, 'views' => 0, 'liked' => false, 'reposted' => false, 'bookmarked' => false];
     $q = db()->prepare("SELECT post_id, COUNT(*) n FROM likes WHERE post_id IN ($in) GROUP BY post_id");  $q->execute($postIds);
     foreach ($q as $r) $out[(int)$r['post_id']]['likes'] = (int)$r['n'];
     $q = db()->prepare("SELECT post_id, COUNT(*) n FROM reposts WHERE post_id IN ($in) GROUP BY post_id"); $q->execute($postIds);
     foreach ($q as $r) $out[(int)$r['post_id']]['reposts'] = (int)$r['n'];
     $q = db()->prepare("SELECT reply_to post_id, COUNT(*) n FROM posts WHERE reply_to IN ($in) AND deleted_at IS NULL GROUP BY reply_to"); $q->execute($postIds);
     foreach ($q as $r) $out[(int)$r['post_id']]['replies'] = (int)$r['n'];
+    $q = db()->prepare("SELECT post_id, COUNT(*) n FROM post_views WHERE post_id IN ($in) GROUP BY post_id"); $q->execute($postIds);
+    foreach ($q as $r) $out[(int)$r['post_id']]['views'] = (int)$r['n'];
     if ($me) {
         $q = db()->prepare("SELECT post_id FROM likes WHERE user_id = ? AND post_id IN ($in)"); $q->execute(array_merge([$me], $postIds));
         foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $pid) $out[(int)$pid]['liked'] = true;
         $q = db()->prepare("SELECT post_id FROM reposts WHERE user_id = ? AND post_id IN ($in)"); $q->execute(array_merge([$me], $postIds));
         foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $pid) $out[(int)$pid]['reposted'] = true;
+        $q = db()->prepare("SELECT post_id FROM bookmarks WHERE user_id = ? AND post_id IN ($in)"); $q->execute(array_merge([$me], $postIds));
+        foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $pid) $out[(int)$pid]['bookmarked'] = true;
     }
     return $out;
 }
@@ -182,45 +190,94 @@ function post_stats(array $postIds, int $me): array {
 /* ---------- Render de un post ---------- */
 function icon(string $n): string {
     $p = [
-        'reply'  => '<path d="M1.75 12a9.25 9.25 0 1 1 4.5 7.93V22l-3.1-1.6A9.2 9.2 0 0 1 1.75 12Z"/>',
-        'repost' => '<path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 11V9a3 3 0 0 1 3-3h14"/><path d="M7 21.5 3.5 18 7 14.5"/><path d="M20.5 13v2a3 3 0 0 1-3 3h-14"/>',
-        'like'   => '<path d="M12 21s-7.5-4.6-10-9.3C.3 8.3 1.9 4.5 5.5 4.5c2 0 3.3 1.1 4.1 2.3L12 9l2.4-2.2c.8-1.2 2.1-2.3 4.1-2.3 3.6 0 5.2 3.8 3.5 7.2C19.5 16.4 12 21 12 21Z"/>',
-        'liked'  => '<path d="M12 21s-7.5-4.6-10-9.3C.3 8.3 1.9 4.5 5.5 4.5c2 0 3.3 1.1 4.1 2.3L12 9l2.4-2.2c.8-1.2 2.1-2.3 4.1-2.3 3.6 0 5.2 3.8 3.5 7.2C19.5 16.4 12 21 12 21Z" fill="currentColor"/>',
-        'trash'  => '<path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-9 0 1 13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-13"/>',
+        'reply'    => '<path d="M1.75 12a9.25 9.25 0 1 1 4.5 7.93V22l-3.1-1.6A9.2 9.2 0 0 1 1.75 12Z"/>',
+        'repost'   => '<path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 11V9a3 3 0 0 1 3-3h14"/><path d="M7 21.5 3.5 18 7 14.5"/><path d="M20.5 13v2a3 3 0 0 1-3 3h-14"/>',
+        'like'     => '<path d="M12 21s-7.5-4.6-10-9.3C.3 8.3 1.9 4.5 5.5 4.5c2 0 3.3 1.1 4.1 2.3L12 9l2.4-2.2c.8-1.2 2.1-2.3 4.1-2.3 3.6 0 5.2 3.8 3.5 7.2C19.5 16.4 12 21 12 21Z"/>',
+        'liked'    => '<path d="M12 21s-7.5-4.6-10-9.3C.3 8.3 1.9 4.5 5.5 4.5c2 0 3.3 1.1 4.1 2.3L12 9l2.4-2.2c.8-1.2 2.1-2.3 4.1-2.3 3.6 0 5.2 3.8 3.5 7.2C19.5 16.4 12 21 12 21Z" fill="currentColor"/>',
+        'trash'    => '<path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-9 0 1 13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-13"/>',
+        'views'    => '<path d="M3 20V10M9 20V4M15 20v-8M21 20V7"/>',
+        'bookmark' => '<path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.5L5 21V4a1 1 0 0 1 1-1Z"/>',
+        'bookmarked' => '<path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.5L5 21V4a1 1 0 0 1 1-1Z" fill="currentColor"/>',
+        'share'    => '<path d="M12 3v13"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6"/>',
+        'quote'    => '<path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 11V9a3 3 0 0 1 3-3h14"/><path d="M7 21.5 3.5 18 7 14.5"/><path d="M20.5 13v2a3 3 0 0 1-3 3h-14"/>',
+        'pin'      => '<path d="M9 4h6l-1 6 3 3H7l3-3-1-6Z"/><path d="M12 13v7"/>',
+        'more'     => '<circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none"/>',
+        'live'     => '<circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M6.5 6.5a8 8 0 0 0 0 11M17.5 6.5a8 8 0 0 1 0 11"/>',
     ];
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' . ($p[$n] ?? '') . '</svg>';
+}
+// Insignia de creador verificado (solo se muestra; se activa a mano en la base).
+function verified_badge(array $u): string {
+    if (empty($u['verified'])) return '';
+    return '<span class="vbadge" title="Creador VTuber verificado"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 1.5 14.3 4l3.4-.3.9 3.3 3 1.7-1.3 3.2 1.3 3.2-3 1.7-.9 3.3-3.4-.3L12 22.5 9.7 20l-3.4.3-.9-3.3-3-1.7 1.3-3.2L2.4 8.7l3-1.7.9-3.3L9.7 4 12 1.5Z"/><path fill="var(--bg)" d="m8.2 12.1 2.5 2.5 5-5 1.3 1.3-6.3 6.3-3.8-3.8 1.3-1.3Z"/></svg></span>';
 }
 function num(int $n): string {
     if ($n >= 1000000) return rtrim(rtrim(number_format($n / 1000000, 1), '0'), '.') . 'M';
     if ($n >= 1000)    return rtrim(rtrim(number_format($n / 1000, 1), '0'), '.') . 'K';
     return $n ? (string)$n : '';
 }
+// Tarjeta compacta de un post citado (embebida dentro de otro). Hace su propia consulta.
+function quoted_card(int $id): string {
+    static $cache = [];
+    if (isset($cache[$id])) return $cache[$id];
+    $st = db()->prepare('SELECT * FROM posts WHERE id = ? AND deleted_at IS NULL'); $st->execute([$id]);
+    $q = $st->fetch();
+    if (!$q) return $cache[$id] = '<div class="quoted quoted-gone">Publicación no disponible</div>';
+    $au = user_by_id((int)$q['user_id']) ?? ['id'=>0,'name'=>'Usuario','handle'=>'user','avatar'=>null,'verified'=>0];
+    $qurl = base_url('/post.php?id=' . $id);
+    $img = upload_url('posts', $q['image'] ?? null);
+    $body = mb_strlen((string)$q['body']) > 180 ? mb_substr((string)$q['body'], 0, 180) . '…' : (string)$q['body'];
+    ob_start(); ?>
+    <a class="quoted" href="<?= e($qurl) ?>">
+      <div class="quoted-head"><?= avatar_html($au, 20) ?><b><?= e($au['name']) ?></b><?= verified_badge($au) ?><span>@<?= e($au['handle']) ?> · <?= e(time_ago($q['created_at'])) ?></span></div>
+      <?php if (trim($body) !== ''): ?><div class="quoted-body"><?= e($body) ?></div><?php endif; ?>
+      <?php if ($img): ?><div class="quoted-img"><img src="<?= e($img) ?>" alt="" loading="lazy"></div><?php endif; ?>
+    </a>
+    <?php return $cache[$id] = ob_get_clean();
+}
+
 // $p: fila de posts; $users: mapa; $stats: mapa; $me: id actual.
-function render_post(array $p, array $users, array $stats, int $me, bool $link = true): string {
-    $au = $users[(int)$p['user_id']] ?? ['id' => (int)$p['user_id'], 'name' => 'Usuario', 'handle' => 'user', 'avatar' => null];
-    $st = $stats[(int)$p['id']] ?? ['likes' => 0, 'reposts' => 0, 'replies' => 0, 'liked' => false, 'reposted' => false];
-    $purl = base_url('/post.php?id=' . (int)$p['id']);
+function render_post(array $p, array $users, array $stats, int $me, bool $link = true, bool $pinned = false): string {
+    $pid = (int)$p['id'];
+    $au = $users[(int)$p['user_id']] ?? ['id' => (int)$p['user_id'], 'name' => 'Usuario', 'handle' => 'user', 'avatar' => null, 'verified' => 0];
+    $st = $stats[$pid] ?? ['likes'=>0,'reposts'=>0,'replies'=>0,'views'=>0,'liked'=>false,'reposted'=>false,'bookmarked'=>false];
+    $purl = base_url('/post.php?id=' . $pid);
     $prof = base_url('/profile.php?u=' . rawurlencode($au['handle']));
     $img = upload_url('posts', $p['image'] ?? null);
+    $mine = $me === (int)$p['user_id'];
+    $quoteOf = isset($p['repost_of']) && $p['repost_of'] ? (int)$p['repost_of'] : 0;
     ob_start(); ?>
-    <article class="post" data-id="<?= (int)$p['id'] ?>"<?= $link ? ' data-href="' . e($purl) . '"' : '' ?>>
+    <article class="post" data-id="<?= $pid ?>"<?= $link ? ' data-href="' . e($purl) . '"' : '' ?>>
+      <?php if ($pinned): ?><div class="pin-flag"><?= icon('pin') ?> Fijado</div><?php endif; ?>
       <a class="post-av" href="<?= e($prof) ?>"><?= avatar_html($au, 44) ?></a>
       <div class="post-main">
         <div class="post-head">
-          <a class="post-name" href="<?= e($prof) ?>"><?= e($au['name']) ?></a>
+          <a class="post-name" href="<?= e($prof) ?>"><?= e($au['name']) ?></a><?= verified_badge($au) ?>
           <span class="post-handle">@<?= e($au['handle']) ?></span>
           <span class="dot">·</span>
           <a class="post-time" href="<?= e($purl) ?>"><?= e(time_ago($p['created_at'])) ?></a>
-          <?php if ($me === (int)$p['user_id']): ?>
-            <button class="post-del" data-del="<?= (int)$p['id'] ?>" title="Eliminar" aria-label="Eliminar"><?= icon('trash') ?></button>
-          <?php endif; ?>
+          <div class="post-menu">
+            <button class="post-more" data-menu aria-label="Más"><?= icon('more') ?></button>
+            <div class="menu" hidden>
+              <?php if ($mine): ?>
+                <button data-pin="<?= $pid ?>"><?= icon('pin') ?><?= $pinned ? 'Dejar de fijar' : 'Fijar en tu perfil' ?></button>
+                <button class="danger" data-del="<?= $pid ?>"><?= icon('trash') ?>Eliminar</button>
+              <?php else: ?>
+                <button data-copy="<?= e($purl) ?>"><?= icon('share') ?>Copiar enlace</button>
+              <?php endif; ?>
+            </div>
+          </div>
         </div>
         <?php if (trim((string)$p['body']) !== ''): ?><div class="post-body"><?= linkify($p['body']) ?></div><?php endif; ?>
         <?php if ($img): ?><a class="post-img" href="<?= e($img) ?>" target="_blank" rel="noopener"><img src="<?= e($img) ?>" alt="" loading="lazy"></a><?php endif; ?>
+        <?php if ($quoteOf): ?><?= quoted_card($quoteOf) ?><?php endif; ?>
         <div class="post-acts">
-          <a class="act act-reply" href="<?= e($purl) ?>"><?= icon('reply') ?><span><?= num($st['replies']) ?></span></a>
-          <button class="act act-repost <?= $st['reposted'] ? 'on' : '' ?>" data-repost="<?= (int)$p['id'] ?>"><?= icon('repost') ?><span><?= num($st['reposts']) ?></span></button>
-          <button class="act act-like <?= $st['liked'] ? 'on' : '' ?>" data-like="<?= (int)$p['id'] ?>"><?= $st['liked'] ? icon('liked') : icon('like') ?><span><?= num($st['likes']) ?></span></button>
+          <a class="act act-reply" href="<?= e($purl) ?>" title="Responder"><?= icon('reply') ?><span><?= num($st['replies']) ?></span></a>
+          <button class="act act-repost <?= $st['reposted'] ? 'on' : '' ?>" data-repost="<?= $pid ?>" title="Repostear"><?= icon('repost') ?><span><?= num($st['reposts']) ?></span></button>
+          <button class="act act-like <?= $st['liked'] ? 'on' : '' ?>" data-like="<?= $pid ?>" title="Me gusta"><?= $st['liked'] ? icon('liked') : icon('like') ?><span><?= num($st['likes']) ?></span></button>
+          <a class="act act-views" href="<?= e($purl) ?>" title="Visualizaciones"><?= icon('views') ?><span><?= num($st['views']) ?></span></a>
+          <button class="act act-bm <?= $st['bookmarked'] ? 'on' : '' ?>" data-bookmark="<?= $pid ?>" title="Guardar"><?= $st['bookmarked'] ? icon('bookmarked') : icon('bookmark') ?></button>
+          <button class="act act-share" data-copy="<?= e($purl) ?>" title="Compartir"><?= icon('share') ?></button>
         </div>
       </div>
     </article>
@@ -279,7 +336,7 @@ function feed_refs(string $type, array $p, int $limit, int $offset): array {
             if (!$ids) return [];
             $in = implode(',', array_fill(0, count($ids), '?'));
             $sql = "SELECT id AS post_id, created_at AS ts, NULL AS rb FROM posts
-                      WHERE user_id IN ($in) AND reply_to IS NULL AND repost_of IS NULL AND deleted_at IS NULL
+                      WHERE user_id IN ($in) AND reply_to IS NULL AND deleted_at IS NULL
                     UNION ALL
                     SELECT post_id, created_at AS ts, user_id AS rb FROM reposts WHERE user_id IN ($in)
                     ORDER BY ts DESC LIMIT $limit OFFSET $offset";
@@ -288,18 +345,32 @@ function feed_refs(string $type, array $p, int $limit, int $offset): array {
         }
         case 'explore':
             $st = db()->prepare("SELECT id AS post_id, NULL AS rb FROM posts
-                WHERE reply_to IS NULL AND repost_of IS NULL AND deleted_at IS NULL
+                WHERE reply_to IS NULL AND deleted_at IS NULL
                 ORDER BY id DESC LIMIT $limit OFFSET $offset"); $st->execute();
             break;
-        case 'user':
-            $st = db()->prepare("SELECT post_id, ts, rb FROM (
+        case 'user_media':
+            $st = db()->prepare("SELECT id AS post_id, NULL AS rb FROM posts
+                WHERE user_id = ? AND image IS NOT NULL AND deleted_at IS NULL
+                ORDER BY id DESC LIMIT $limit OFFSET $offset"); $st->execute([$p['uid']]);
+            break;
+        case 'bookmarks':
+            $st = db()->prepare("SELECT b.post_id AS post_id, NULL AS rb FROM bookmarks b
+                JOIN posts p ON p.id = b.post_id AND p.deleted_at IS NULL
+                WHERE b.user_id = ? ORDER BY b.created_at DESC LIMIT $limit OFFSET $offset"); $st->execute([$p['uid']]);
+            break;
+        case 'user': {
+            $ex = (int)($p['exclude'] ?? 0);
+            $exSql = $ex ? ' AND id <> ?' : '';
+            $sql = "SELECT post_id, ts, rb FROM (
                     SELECT id AS post_id, created_at AS ts, NULL AS rb FROM posts
-                      WHERE user_id = ? AND reply_to IS NULL AND deleted_at IS NULL
+                      WHERE user_id = ? AND reply_to IS NULL AND deleted_at IS NULL$exSql
                     UNION ALL
                     SELECT post_id, created_at AS ts, user_id AS rb FROM reposts WHERE user_id = ?
-                  ) t ORDER BY ts DESC LIMIT $limit OFFSET $offset");
-            $st->execute([$p['uid'], $p['uid']]);
+                  ) t ORDER BY ts DESC LIMIT $limit OFFSET $offset";
+            $args = [$p['uid']]; if ($ex) $args[] = $ex; $args[] = $p['uid'];
+            $st = db()->prepare($sql); $st->execute($args);
             break;
+        }
         case 'user_replies':
             $st = db()->prepare("SELECT id AS post_id, NULL AS rb FROM posts
                 WHERE user_id = ? AND reply_to IS NOT NULL AND deleted_at IS NULL
@@ -359,4 +430,65 @@ function render_feed(string $type, array $p, int $me, int $offset = 0, int $limi
     $html = render_refs($refs, $me);
     $next = count($refs) >= $limit ? $offset + $limit : null;
     return [$html, $next];
+}
+
+/* ---------- Columna derecha: tendencias + a quién seguir (datos reales) ---------- */
+// Hashtags más usados; primero de los últimos 7 días, si no hay, de siempre.
+function trending_tags(int $limit = 6): array {
+    $run = function (?string $since) use ($limit) {
+        $where = $since ? "AND p.created_at >= '$since'" : '';
+        $sql = "SELECT h.tag, COUNT(*) n FROM post_hashtags ph
+                JOIN hashtags h ON h.id = ph.hashtag_id
+                JOIN posts p ON p.id = ph.post_id AND p.deleted_at IS NULL $where
+                GROUP BY h.tag ORDER BY n DESC, h.tag ASC LIMIT $limit";
+        return db()->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    };
+    $since = gmdate('Y-m-d H:i:s', time() - 7 * 86400);
+    $rows = $run($since);
+    if (!$rows) $rows = $run(null);
+    return $rows;
+}
+// Usuarios que NO sigo, ordenados por nº de seguidores. Excluye a mí y a quien ya sigo.
+function who_to_follow(int $me, int $limit = 3): array {
+    $exclude = [0];
+    if ($me) {
+        $exclude[] = $me;
+        $st = db()->prepare('SELECT followee_id FROM follows WHERE follower_id = ?'); $st->execute([$me]);
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $x) $exclude[] = (int)$x;
+    }
+    $rows = db()->query("SELECT t.uid, (SELECT COUNT(*) FROM follows f WHERE f.followee_id = t.uid) fc
+        FROM (SELECT DISTINCT user_id uid FROM posts WHERE deleted_at IS NULL) t
+        ORDER BY fc DESC, t.uid DESC LIMIT 40")->fetchAll(PDO::FETCH_ASSOC);
+    $pick = [];
+    foreach ($rows as $r) { $uid = (int)$r['uid']; if (in_array($uid, $exclude, true)) continue; $pick[] = $uid; if (count($pick) >= $limit) break; }
+    return $pick;
+}
+// HTML de los widgets de la derecha (para pasar como $SIDEBAR).
+function render_aside(int $me): string {
+    $html = '';
+    $tags = trending_tags(6);
+    if ($tags) {
+        $html .= '<div class="widget"><h2>Tendencias</h2>';
+        foreach ($tags as $t) {
+            $url = base_url('/hashtag.php?tag=' . rawurlencode($t['tag']));
+            $html .= '<a class="trend" href="' . e($url) . '"><div class="c">Tendencia</div><div class="t">#' . e($t['tag']) . '</div><div class="c">' . num((int)$t['n']) . ' publicacion' . ((int)$t['n'] === 1 ? '' : 'es') . '</div></a>';
+        }
+        $html .= '</div>';
+    }
+    $ids = who_to_follow($me, 3);
+    if ($ids) {
+        $users = users_by_ids($ids);
+        $html .= '<div class="widget"><h2>A quién seguir</h2>';
+        foreach ($ids as $uid) {
+            $u = $users[$uid] ?? null; if (!$u) continue;
+            $prof = base_url('/profile.php?u=' . rawurlencode($u['handle']));
+            $html .= '<div class="wrow"><a href="' . e($prof) . '">' . avatar_html($u, 40) . '</a>'
+                . '<a href="' . e($prof) . '" style="min-width:0"><div class="nm">' . e($u['name']) . verified_badge($u) . '</div><div class="hd">@' . e($u['handle']) . '</div></a>';
+            if ($me) $html .= '<button class="btn-follow" data-follow="' . $uid . '">Seguir</button>';
+            else $html .= '<a class="btn-follow" href="' . e(base_url('/auth/login.php')) . '">Seguir</a>';
+            $html .= '</div>';
+        }
+        $html .= '</div>';
+    }
+    return $html;
 }
