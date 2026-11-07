@@ -39,7 +39,7 @@ $back = base_url('/');
   <p class="divider"><a href="<?= e(base_url('/explore.php')) ?>" style="color:var(--accent)">Explorar sin cuenta</a> · <a href="/shop/" style="color:var(--muted)">Ir a la tienda</a></p>
 </div>
 
-<script src="/assets/google.js?v=1"></script>
+<script src="/assets/google.js?v=2"></script>
 <script>
 (function(){
   var back = <?= json_encode($back) ?>;
